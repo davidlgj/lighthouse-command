@@ -1,21 +1,75 @@
-use std::io::{self, /* Write, */ BufRead};
+use std::io::{self, Write, BufRead};
 use std::fs;
+use std::env;
 
-const FOLDER: &str = "/home/david/Projekt/components";
+extern crate regex;
+use regex::Regex;
 
-enum Command {
-    Gitlab,
-    Terminal,
-    Atom,
+
+#[derive(Debug)]
+struct Settings {
+    pub folder: Option<String>,
+    pub keys: Vec<String>,
+    pub commands: Vec<String>,
 }
 
 
+impl Settings {
+    pub fn parse_commandline(args: Vec<String>) -> Settings {
+        let mut commands = Vec::with_capacity(args.len());
+        let mut keys = Vec::with_capacity(args.len());
+        let mut folder = None;
+        let mut skip = true;
+        for arg in args {
+            println!("Arg is {:?}", arg);
+            if arg.ends_with("component-launcher") {
+                skip = false;
+                continue;
+            }
+            if skip {
+                continue;
+            }
 
-fn read_components() -> std::io::Result<Vec<String>> {
+            // folder option, defaults to .
+            if arg.starts_with("--folder=") {
+                let mut split = arg.split('=');
+                if let Some(_) = split.next() {
+                    if let Some(p) = split.next() {
+                        folder = Some(String::from(p));
+                    }
+                }
+            } else {
+                // All other args should follow the format
+                // "<char>|<command>"
+                if arg.contains('|') {
+                    let mut split = arg.split('|');
+                    if let Some(key) = split.next() {
+                        if let Some(command) = split.next() {
+                            keys.push(String::from(key.trim_start_matches('"')));
+                            commands.push(String::from(command.trim_end_matches('"')));
+                        }
+                    }
+                } else {
+                    // ...maybe except one, it gets defaulted to '*'
+                    keys.push(String::from("*"));
+                    commands.push(String::from(arg.trim_matches('"')));
+                }
+            }
+        }
+
+        Settings {
+            folder: folder,
+            keys: keys,
+            commands: commands
+        }
+    }
+}
+
+
+fn read_components(folder: &str) -> std::io::Result<Vec<String>> {
     let mut folders = Vec::with_capacity(128);
-    for entry in fs::read_dir(FOLDER)? {
+    for entry in fs::read_dir(folder)? {
         let dir = entry?;
-        // writeln!(io::stderr(), "{:?}", dir.file_name());
         folders.push(dir.file_name().into_string().unwrap())
     }
     folders.sort();
@@ -23,50 +77,68 @@ fn read_components() -> std::io::Result<Vec<String>> {
 }
 
 
+
+
 fn main() -> io::Result<()> {
-    let folders = read_components().unwrap();
+    let args: Vec<_> = env::args().collect();
+
+    if args.len() < 1 {
+        print!("To few arguments. Someday I'll write a usage.");
+        std::process::exit(1);
+    }
+
+    let settings = Settings::parse_commandline(args);
+    println!("{:?}", settings);
+
+    let folders = match settings.folder {
+        Some(f) => read_components(&f).unwrap(),
+        None => read_components(".").unwrap(),
+    };
+
+    let re_start = Regex::new(r"(?P<key>[a-z])\s(?P<search>[.a-zA-Z\-]+)").unwrap();
+    let re_end = Regex::new(r"(?P<search>[.a-zA-Z\-]+)\s(?P<key>[a-z])$").unwrap();
+
     let stdin = io::stdin();
     let handle = stdin.lock();
-    let mut command;
-
     for line in handle.lines() {
-        // writeln!(std::io::stderr(), "{:?}", line);
         match line {
-            Ok(needle) => {
-                let parsed;
-                if needle.starts_with("g ") {
-                    parsed = String::from(&needle[2..]);
-                    command = Command::Gitlab;
-                } else if needle.starts_with("t ") || needle.starts_with("a ") {
-                    parsed = String::from(&needle[2..]);
-                    command = Command::Terminal;
+            Ok(input) => {
+                let key;
+                let search;
+                if let Some(capture) = re_end.captures(&input) {
+                    key = String::from(&capture["key"]);
+                    search = String::from(&capture["search"]);
+                } else if let Some(capture) = re_start.captures(&input) {
+                    key = String::from(&capture["key"]);
+                    search = String::from(&capture["search"]);
                 } else {
-                    parsed = needle;
-                    command = Command::Atom;
-                }
-                if parsed.len() == 0 {
-                    continue;
+                    key = String::from("*");
+                    search = input;
                 }
 
-                let tws_needle = String::from("tws-") + &parsed;
-                for folder in &folders {
-                    if folder.starts_with(&parsed) || folder.starts_with(&tws_needle) {
-                        match command {
-                            Command::Gitlab => {
-                                if folder.starts_with("tws-") {
-                                    print!("{{ {} | xdg-open https://gitlab.textalk.com/webshop/diversity/native-components/{} }} ", folder, folder);
-                                    // writeln!(io::stderr(),"{{ {} | xdg-open https://gitlab.textalk.com/webshop/diversity/native-components/{} }} ", folder, folder);
-                                } else {
-                                    // Probably a theme
-                                    print!("{{ {} | xdg-open https://gitlab.textalk.com/webshop/diversity/themes/{} }}  ", folder, folder);
-                                    // writeln!(io::stderr(),"{{ {} | xdg-open https://gitlab.textalk.com/webshop/diversity/themes/{} }}  ", folder, folder);
-                                }
-                            },
-                            Command::Terminal => print!("{{ {} | alacritty --working-directory  {}/{} }}", folder, FOLDER, folder),
-                            _ => print!("{{ {} | atom {}/{} }}", folder, FOLDER, folder)
-                        }
+                // Find a command
+                let mut command = "echo {}";
+                for (i, k) in settings.keys.iter().enumerate() {
+                    if k == &key {
+                        command = &settings.commands[i];
                     }
                 }
+                writeln!(std::io::stderr(), "{:?}", search);
+
+                // First exact matches, and then a little more fuzzy
+                for folder in &folders {
+                    if folder.starts_with(&search) {
+                        print!("{{ {} | {} }}", folder, command.replace("{}",folder));
+                    }
+                }
+
+                // And one little more "fuzzy"
+                for folder in &folders {
+                    if folder.contains(&search) {
+                        print!("{{ {} | {} }}", folder, command.replace("{}",folder));
+                    }
+                }
+
                 println!("");
             },
             _ => ()
