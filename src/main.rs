@@ -21,7 +21,6 @@ impl Settings {
         let mut folder = None;
         let mut skip = true;
         for arg in args {
-            println!("Arg is {:?}", arg);
             if arg.ends_with("component-launcher") {
                 skip = false;
                 continue;
@@ -83,12 +82,11 @@ fn main() -> io::Result<()> {
     let args: Vec<_> = env::args().collect();
 
     if args.len() < 1 {
-        print!("To few arguments. Someday I'll write a usage.");
+        println!("To few arguments. Someday I'll write a usage.");
         std::process::exit(1);
     }
 
     let settings = Settings::parse_commandline(args);
-    println!("{:?}", settings);
 
     let folders = match settings.folder {
         Some(f) => read_components(&f).unwrap(),
@@ -123,7 +121,7 @@ fn main() -> io::Result<()> {
                         command = &settings.commands[i];
                     }
                 }
-                writeln!(std::io::stderr(), "{:?}", search);
+                // writeln!(std::io::stderr(), "{:?}", search);
 
                 // First exact matches, and then a little more fuzzy
                 for folder in &folders {
