@@ -1,5 +1,5 @@
 [package]
-name = "component-launcher"
+name = "lighthouse-command"
 version = "0.1.0"
 authors = ["David Jensen <david.lgj@gmail.com>"]
 edition = "2018"

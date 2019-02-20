@@ -21,11 +21,9 @@ impl Settings {
         let mut folder = None;
         let mut skip = true;
         for arg in args {
-            if arg.ends_with("component-launcher") {
-                skip = false;
-                continue;
-            }
+            // Skip first
             if skip {
+                skip = false;
                 continue;
             }
 
@@ -87,7 +85,7 @@ fn main() -> io::Result<()> {
     }
 
     let settings = Settings::parse_commandline(args);
-
+    // eprintln!("{:?}", settings);
     let folders = match settings.folder {
         Some(f) => read_components(&f).unwrap(),
         None => read_components(".").unwrap(),
